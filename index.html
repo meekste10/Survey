@@ -21,7 +21,8 @@
   .row-flex{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .pill{display:inline-block;padding:5px 10px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:12px}
   .controls label{font-size:12px;color:var(--muted);display:block;margin:.25rem 0}
-  .controls input,.controls select{width:100%;padding:10px;background:#0d1018;color:var(--text);border:1px solid var(--border);border-radius:8px}
+  .controls input,.controls select,.controls button{width:100%;padding:10px;background:#0d1018;color:var(--text);border:1px solid var(--border);border-radius:8px}
+  .controls input[type="file"]{padding:8px}
   .controls .row{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}
   .controls .row>div{grid-column:span 4}
   .btn{display:inline-block;background:var(--accent);color:#081017;border:0;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
@@ -56,20 +57,25 @@
     <!-- Controls -->
     <div class="col-12 card controls">
       <div class="row">
-        <div class="col-6" style="grid-column:span 6">
-          <label>CSV Data Source (GitHub RAW or local file URL)</label>
-          <input id="csvUrl" value="https://raw.githubusercontent.com/meekste10/Survey/main/EmployeeSurveys.csv">
+        <div class="col-4">
+          <label>Choose CSV (recommended)</label>
+          <input id="fileInput" type="file" accept=".csv,text/csv" />
         </div>
-        <div class="col-3">
+        <div class="col-4">
+          <label>— or — CSV URL (optional)</label>
+          <input id="csvUrl" placeholder="https://raw.githubusercontent.com/<user>/Survey/main/EmployeeSurveys.csv" />
+          <button class="btn" id="reloadBtn" style="margin-top:8px">Load from URL</button>
+        </div>
+        <div class="col-4">
           <label>Question to Analyze</label>
           <select id="questionSelect"></select>
         </div>
+      </div>
+      <div class="row" style="margin-top:12px">
         <div class="col-3">
           <label>Search (name/email/text)</label>
           <input id="searchBox" placeholder="Type to filter…" />
         </div>
-      </div>
-      <div class="row" style="margin-top:12px">
         <div class="col-3">
           <label>Date From</label>
           <input id="dateFrom" type="date" />
@@ -81,10 +87,7 @@
         <div class="col-3">
           <label><input type="checkbox" id="hideIdentities" checked /> Hide names & emails</label>
           <label><input type="checkbox" id="onlyWithAnswers" checked /> Only rows with answer</label>
-        </div>
-        <div class="col-3" style="display:flex;gap:10px;align-items:flex-end">
-          <button class="btn" id="reloadBtn">Load CSV</button>
-          <button class="btn secondary" id="exportBtn">Export filtered CSV</button>
+          <button class="btn secondary" id="exportBtn" style="margin-top:8px">Export filtered CSV</button>
         </div>
       </div>
     </div>
@@ -110,7 +113,7 @@
     <div class="col-3 card">
       <h3>Dataset</h3>
       <div class="small"><span id="colCount">—</span> columns · <span id="idCols">—</span> identity cols</div>
-      <div class="small">CSV: <span id="csvShort" class="muted">—</span></div>
+      <div class="small">Source: <span id="csvShort" class="muted">—</span></div>
     </div>
 
     <!-- Charts -->
@@ -131,7 +134,7 @@
     <!-- Table -->
     <div class="col-12 card">
       <h3>Responses Table</h3>
-      <div class="small muted">Click a row to view the full answer for the selected question</div>
+      <div class="small muted">Tap a row to view the full answer for the selected question</div>
       <table id="dataTable">
         <thead id="tableHead"></thead>
         <tbody id="tableBody"></tbody>
@@ -143,15 +146,15 @@
 <!-- Libraries -->
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://unpkg.com/sentiment@5.0.2/dist/sentiment.min.js"></script>
+<!-- Use the build that exposes a constructor on window.Sentiment -->
+<script src="https://cdn.jsdelivr.net/npm/sentiment@5.0.2/build/sentiment.min.js"></script>
 
 <script>
 (function(){
-  // === FIXED: make Sentiment available ===
+  // Sentiment constructor (fixed for iOS)
   const Sentiment = window.Sentiment;
 
   // ===== CONFIG =====
-  const DEFAULT_CSV_URL = "https://raw.githubusercontent.com/meekste10/Survey/main/EmployeeSurveys.csv";
   const IDENTITY_CANDIDATES = [
     'id','email','name','name2','employee','system name','start time','completion time',"today's date",'todays date','last modified time'
   ];
@@ -165,6 +168,7 @@
   let currentQuestion = null;
 
   // ===== ELEMENTS =====
+  const fileInput = document.getElementById('fileInput');
   const csvUrlEl = document.getElementById('csvUrl');
   const csvShortEl = document.getElementById('csvShort');
   const questionSelect = document.getElementById('questionSelect');
@@ -189,13 +193,7 @@
   let sentChart, kwChart, timeChart;
 
   // ===== HELPERS =====
-  function shortUrl(u){
-    try{
-      const url = new URL(u);
-      const path = url.pathname.split('/').slice(-3).join('/');
-      return url.hostname + '/…/' + path;
-    }catch(e){ return '—'; }
-  }
+  function shortSource(u){ try{ return new URL(u).hostname; } catch(e){ return 'local file'; } }
 
   function detectIdentityCols(cols){
     const set = new Set();
@@ -233,9 +231,9 @@
     return (text||'').toLowerCase().replace(/[^a-z0-9\s']/g,' ')
       .split(/\s+/).filter(Boolean);
   }
+
   const STOP = new Set('the,and,or,a,an,to,of,for,in,on,at,is,it,this,that,with,as,be,are,was,were,by,from,but,so,if,we,you,i,they,our,their,my,me,your,us,not,have,has,had,do,does,did,about,just,like,more,most,less,can,will,would,could,very,really,also,too'.split(','));
 
-  // Theme keywords
   const THEMES = {
     Workload: ['workload','overtime','hours','overworked','capacity','stress','busy','burnout','too much','understaffed'],
     Communication: ['communication','communicate','feedback','clarity','confusing','expectations','direction','alignment','updates'],
@@ -310,11 +308,24 @@
 
   function filterRows(){
     const q = (searchBox.value||'').toLowerCase();
+    const from = dateFromEl.value ? new Date(dateFromEl.value+'T00:00:00') : null;
+    const to = dateToEl.value ? new Date(dateToEl.value+'T23:59:59') : null;
     return CLEAN.filter(r=>{
+      // search
       if (q){
         const hay = Object.values(r).join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
+      // date
+      if (from || to){
+        const when = r['Completion time'] || r['Completion Time'] || r['Start time'] || r['Start Time'] || '';
+        const d = parseDate(when);
+        if (d){
+          if (from && d<from) return false;
+          if (to && d>to) return false;
+        }
+      }
+      // has answer required?
       if (onlyWithAnswersEl.checked && currentQuestion){
         const ans = (r[currentQuestion]||'').trim();
         if (!ans) return false;
@@ -323,16 +334,40 @@
     });
   }
 
+  function makeBar(ctx, labels, data, title){
+    if (ctx.chartInstance) ctx.chartInstance.destroy();
+    ctx.chartInstance = new Chart(ctx, {
+      type:'bar',
+      data:{ labels, datasets:[{ label:title, data }] },
+      options:{
+        responsive:true,
+        plugins:{ legend:{ display:false } },
+        scales:{ x:{ ticks:{ color:'#9aa4b2' }}, y:{ ticks:{ color:'#9aa4b2' }} }
+      }
+    });
+  }
+
+  function makeLine(ctx, labels, data, title){
+    if (ctx.chartInstance) ctx.chartInstance.destroy();
+    ctx.chartInstance = new Chart(ctx,{
+      type:'line',
+      data:{ labels, datasets:[{ label:title, data, tension:.3, fill:false }] },
+      options:{ responsive:true, plugins:{ legend:{ display:false } },
+        scales:{ x:{ ticks:{ color:'#9aa4b2' }}, y:{ ticks:{ color:'#9aa4b2' }} } }
+    });
+  }
+
   function renderKPIs(rows){
     const field = currentQuestion;
     const sent = sentimentForRows(rows, field);
-    avgSentimentEl.textContent = sent.avg.toFixed(2);
-    sentCountsEl.textContent = `+${sent.pos} / 0:${sent.neu} / -${sent.neg} (n=${sent.total})`;
+    document.getElementById('avgSentiment').textContent = sent.avg.toFixed(2);
+    document.getElementById('sentCounts').textContent = `+${sent.pos} / 0:${sent.neu} / -${sent.neg} (n=${sent.total})`;
 
     let risky = 0;
     rows.forEach(r=>{ if (computeRisk(r, field) >= 3) risky++; });
     riskCountEl.textContent = risky;
     riskExplainEl.textContent = "≥3 (neg tone + risk keywords)";
+
     const themeFreq = Object.create(null);
     rows.forEach(r=>{
       const ans = (r[field]||'') + ' ' + Object.values(r).join(' ');
@@ -343,39 +378,6 @@
       const span = document.createElement('span'); span.className='chip'; span.textContent=`${t} (${c})`;
       themeChipsEl.appendChild(span);
     });
-  }
-
-  function makeBar(ctx, labels, data, title){
-    if (ctx.chartInstance) ctx.chartInstance.destroy();
-    ctx.chartInstance = new Chart(ctx, {
-      type:'bar',
-      data:{ labels, datasets:[{ label:title, data }] },
-      options:{ responsive:true, plugins:{ legend:{ display:false } } }
-    });
-  }
-
-  function makeLine(ctx, labels, data, title){
-    if (ctx.chartInstance) ctx.chartInstance.destroy();
-    ctx.chartInstance = new Chart(ctx,{
-      type:'line',
-      data:{ labels, datasets:[{ label:title, data, tension:.3, fill:false }] },
-      options:{ responsive:true, plugins:{ legend:{ display:false } } }
-    });
-  }
-
-  function updateCharts(rows){
-    const field = currentQuestion;
-    const sent = sentimentForRows(rows, field);
-    const sentCtx = document.getElementById('sentChart').getContext('2d');
-    makeBar(sentCtx, ['Positive','Neutral','Negative'], [sent.pos, sent.neu, sent.neg], 'Sentiment');
-
-    const kw = topKeywords(rows, field, 15);
-    const kwCtx = document.getElementById('kwChart').getContext('2d');
-    makeBar(kwCtx, kw.map(k=>k[0]), kw.map(k[1]), 'Keywords');
-
-    const tl = responsesOverTime(rows);
-    const tlCtx = document.getElementById('timeChart').getContext('2d');
-    makeLine(tlCtx, tl.labels, tl.values, 'Responses');
   }
 
   function buildTable(rows){
@@ -422,6 +424,21 @@
     });
   }
 
+  function updateCharts(rows){
+    const field = currentQuestion;
+    const sent = sentimentForRows(rows, field);
+    makeBar(document.getElementById('sentChart').getContext('2d'),
+      ['Positive','Neutral','Negative'], [sent.pos, sent.neu, sent.neg], 'Sentiment');
+
+    const kw = topKeywords(rows, field, 15);
+    makeBar(document.getElementById('kwChart').getContext('2d'),
+      kw.map(k=>k[0]), kw.map(k=>k[1]), 'Keywords');
+
+    const tl = responsesOverTime(rows);
+    makeLine(document.getElementById('timeChart').getContext('2d'),
+      tl.labels, tl.values, 'Responses');
+  }
+
   function refresh(){
     const rows = filterRows();
     respCountEl.textContent = 'Responses: ' + rows.length;
@@ -457,31 +474,45 @@
     currentQuestion = questionCols[0] || null;
   }
 
-  function loadCSV(url){
-    return new Promise((resolve,reject)=>{
-      Papa.parse(url, { download:true, header:true, dynamicTyping:false, skipEmptyLines:true,
+  function parseCSVText(text){
+    return new Promise((resolve)=>{
+      Papa.parse(text, { header:true, dynamicTyping:false, skipEmptyLines:true, complete: res => resolve(res.data) });
+    });
+  }
+
+  function parseCSVFile(file){
+    return new Promise((resolve, reject)=>{
+      Papa.parse(file, { header:true, dynamicTyping:false, skipEmptyLines:true,
         complete: res => resolve(res.data), error: reject });
     });
   }
 
-  async function init(url){
+  async function initFromRows(rows, sourceLabel){
+    RAW = rows;
+    CLEAN = cleanRows(RAW);
+    if (!CLEAN.length) throw new Error('No rows loaded');
+
+    columns = Object.keys(CLEAN[0]);
+    identityCols = detectIdentityCols(columns);
+    questionCols = detectQuestions(columns, identityCols);
+
+    buildQuestionSelect();
+    respCountEl.textContent = 'Responses: ' + CLEAN.length;
+    updatedAtEl.textContent = 'Loaded: ' + new Date().toLocaleString();
+    csvShortEl.textContent = sourceLabel || 'local file';
+    colCountEl.textContent = columns.length;
+    idColsEl.textContent = identityCols.length;
+    refresh();
+  }
+
+  async function initFromUrl(url){
     try{
       updatedAtEl.textContent = 'Loading…';
-      RAW = await loadCSV(url);
-      CLEAN = cleanRows(RAW);
-      if (!CLEAN.length) throw new Error('No rows loaded');
-
-      columns = Object.keys(CLEAN[0]);
-      identityCols = detectIdentityCols(columns);
-      questionCols = detectQuestions(columns, identityCols);
-
-      buildQuestionSelect();
-      respCountEl.textContent = 'Responses: ' + CLEAN.length;
-      updatedAtEl.textContent = 'Loaded: ' + new Date().toLocaleString();
-      csvShortEl.textContent = shortUrl(url);
-      colCountEl.textContent = columns.length;
-      idColsEl.textContent = identityCols.length;
-      refresh();
+      const res = await fetch(url, {cache:'no-store'});
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const text = await res.text();
+      const rows = await parseCSVText(text);
+      await initFromRows(rows, shortSource(url));
     }catch(e){
       updatedAtEl.textContent = 'Load failed';
       alert('Failed to load CSV. Check the URL and that the file is public.\n\n' + e.message);
@@ -489,10 +520,25 @@
   }
 
   // ===== WIRE UP =====
-  reloadBtn.addEventListener('click', ()=>{
-    const url = csvUrlEl.value.trim() || DEFAULT_CSV_URL;
-    init(url);
+  fileInput.addEventListener('change', async (e)=>{
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    updatedAtEl.textContent = 'Loading…';
+    try{
+      const rows = await parseCSVFile(file);
+      await initFromRows(rows, file.name);
+    }catch(err){
+      updatedAtEl.textContent = 'Load failed';
+      alert('Could not read CSV file.\n\n' + err.message);
+    }
   });
+
+  reloadBtn.addEventListener('click', ()=>{
+    const url = csvUrlEl.value.trim();
+    if (!url) return alert('Paste a CSV URL or choose a file.');
+    initFromUrl(url);
+  });
+
   questionSelect.addEventListener('change', e => { currentQuestion = e.target.value; refresh(); });
   searchBox.addEventListener('input', refresh);
   dateFromEl.addEventListener('change', refresh);
@@ -501,8 +547,7 @@
   onlyWithAnswersEl.addEventListener('change', refresh);
   exportBtn.addEventListener('click', exportCSV);
 
-  // Auto-init with default URL
-  init(DEFAULT_CSV_URL);
+  // No auto-load; user picks a file or enters a URL.
 })();
 </script>
 </body>
