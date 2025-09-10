@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Employee Sentiment Dashboard</title>
+<!--
+  HOW TO USE
+  1) Host your CSV at:
+     https://raw.githubusercontent.com/<your-username>/Survey/main/EmployeeSurvey.csv
+  2) Update DEFAULT_CSV_URL below OR paste it into the "CSV Data Source" box and click Load.
+  3) Open this file locally or via GitHub Pages.
+-->
+<style>
+  :root{
+    --bg:#0f1117;--card:#151924;--muted:#9aa4b2;--text:#e9eef4;
+    --accent:#5cc8ff;--accent-2:#a7f3d0;--border:#222838;--chip:#1b2132
+  }
+  *{box-sizing:border-box}
+  html,body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";margin:0}
+  h1,h2,h3{margin:0 0 .5rem 0}
+  a{color:var(--accent);text-decoration:none}
+  .wrap{max-width:1280px;margin:24px auto;padding:0 16px}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .col-12{grid-column:span 12}.col-8{grid-column:span 8}.col-6{grid-column:span 6}.col-4{grid-column:span 4}.col-3{grid-column:span 3}
+  @media(max-width:950px){.col-8,.col-6,.col-4,.col-3{grid-column:span 12}}
+  .row-flex{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .pill{display:inline-block;padding:5px 10px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:12px}
+  .controls label{font-size:12px;color:var(--muted);display:block;margin:.25rem 0}
+  .controls input,.controls select{width:100%;padding:10px;background:#0d1018;color:var(--text);border:1px solid var(--border);border-radius:8px}
+  .controls .row{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}
+  .controls .row>div{grid-column:span 4}
+  .btn{display:inline-block;background:var(--accent);color:#081017;border:0;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
+  .btn.secondary{background:#2a3248;color:var(--text)}
+  .muted{color:var(--muted)} .kpi{font-size:28px;font-weight:800}
+  .small{font-size:12px;color:var(--muted)} .warn{color:#ffd479}.good{color:#7cf8a9}.bad{color:#ff7b9c}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:10px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--card);z-index:2}
+  tr:hover{background:#101626}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:var(--chip);border:1px solid var(--border);padding:4px 8px;border-radius:10px;font-size:12px}
+  canvas{background:#0d1018;border:1px solid var(--border);border-radius:10px;padding:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="grid">
+    <div class="col-12">
+      <div class="row-flex" style="justify-content:space-between">
+        <div>
+          <h1>Employee Sentiment Dashboard</h1>
+          <div class="muted">Interactive analysis of open-ended survey responses (Microsoft Forms CSV).</div>
+        </div>
+        <div class="row-flex">
+          <span class="pill" id="respCount">Responses: —</span>
+          <span class="pill" id="updatedAt">Loaded: —</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="col-12 card controls">
+      <div class="row">
+        <div class="col-6" style="grid-column:span 6">
+          <label>CSV Data Source (GitHub RAW or local file URL)</label>
+          <input id="csvUrl" placeholder="https://raw.githubusercontent.com/&lt;your-username&gt;/Survey/main/EmployeeSurvey.csv" />
+        </div>
+        <div class="col-3">
+          <label>Question to Analyze</label>
+          <select id="questionSelect"></select>
+        </div>
+        <div class="col-3">
+          <label>Search (name/email/text)</label>
+          <input id="searchBox" placeholder="Type to filter…" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div class="col-3">
+          <label>Date From</label>
+          <input id="dateFrom" type="date" />
+        </div>
+        <div class="col-3">
+          <label>Date To</label>
+          <input id="dateTo" type="date" />
+        </div>
+        <div class="col-3">
+          <label><input type="checkbox" id="hideIdentities" checked /> Hide names & emails</label>
+          <label><input type="checkbox" id="onlyWithAnswers" checked /> Only rows with answer</label>
+        </div>
+        <div class="col-3" style="display:flex;gap:10px;align-items:flex-end">
+          <button class="btn" id="reloadBtn">Load CSV</button>
+          <button class="btn secondary" id="exportBtn">Export filtered CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="col-3 card">
+      <h3>Avg Sentiment</h3>
+      <div class="small muted">For selected question</div>
+      <div class="kpi" id="avgSentiment">—</div>
+      <div class="small" id="sentCounts">—</div>
+    </div>
+    <div class="col-3 card">
+      <h3>Retention Risk</h3>
+      <div class="small muted">Heuristic: keywords + sentiment</div>
+      <div class="kpi bad" id="riskCount">—</div>
+      <div class="small" id="riskExplain">—</div>
+    </div>
+    <div class="col-3 card">
+      <h3>Top Themes</h3>
+      <div class="small muted">Auto-tagged from text</div>
+      <div class="chips" id="themeChips"></div>
+    </div>
+    <div class="col-3 card">
+      <h3>Dataset</h3>
+      <div class="small"><span id="colCount">—</span> columns · <span id="idCols">—</span> identity cols</div>
+      <div class="small">CSV: <span id="csvShort" class="muted">—</span></div>
+    </div>
+
+    <!-- Charts -->
+    <div class="col-6 card">
+      <h3>Sentiment Breakdown</h3>
+      <canvas id="sentChart" height="240"></canvas>
+    </div>
+    <div class="col-6 card">
+      <h3>Top Keywords</h3>
+      <canvas id="kwChart" height="240"></canvas>
+    </div>
+    <div class="col-12 card">
+      <h3>Responses Over Time</h3>
+      <div class="small muted">Based on “Completion time” (fallback: “Start time”)</div>
+      <canvas id="timeChart" height="240"></canvas>
+    </div>
+
+    <!-- Table -->
+    <div class="col-12 card">
+      <h3>Responses Table</h3>
+      <div class="small muted">Click a row to view the full answer for the selected question</div>
+      <table id="dataTable">
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Libraries -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/sentiment@5.0.2/dist/sentiment.min.js"></script>
+
+<script>
+(function(){
+  // ===== CONFIG =====
+  const DEFAULT_CSV_URL = "https://raw.githubusercontent.com/<your-username>/Survey/main/EmployeeSurvey.csv";
+  const IDENTITY_CANDIDATES = [
+    'id','email','name','name2','employee','system name','start time','completion time',"today's date",'todays date','last modified time'
+  ];
+
+  // ===== STATE =====
+  let RAW = [];
+  let CLEAN = [];
+  let columns = [];
+  let questionCols = [];
+  let identityCols = [];
+  let currentQuestion = null;
+
+  // ===== ELEMENTS =====
+  const csvUrlEl = document.getElementById('csvUrl');
+  const csvShortEl = document.getElementById('csvShort');
+  const questionSelect = document.getElementById('questionSelect');
+  const searchBox = document.getElementById('searchBox');
+  const dateFromEl = document.getElementById('dateFrom');
+  const dateToEl = document.getElementById('dateTo');
+  const hideIdentitiesEl = document.getElementById('hideIdentities');
+  const onlyWithAnswersEl = document.getElementById('onlyWithAnswers');
+  const reloadBtn = document.getElementById('reloadBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const respCountEl = document.getElementById('respCount');
+  const updatedAtEl = document.getElementById('updatedAt');
+  const colCountEl = document.getElementById('colCount');
+  const idColsEl = document.getElementById('idCols');
+  const avgSentimentEl = document.getElementById('avgSentiment');
+  const sentCountsEl = document.getElementById('sentCounts');
+  const riskCountEl = document.getElementById('riskCount');
+  const riskExplainEl = document.getElementById('riskExplain');
+  const themeChipsEl = document.getElementById('themeChips');
+
+  // Charts
+  let sentChart, kwChart, timeChart;
+
+  // ===== HELPERS =====
+  function shortUrl(u){
+    try{
+      const url = new URL(u);
+      const path = url.pathname.split('/').slice(-3).join('/');
+      return url.hostname + '/…/' + path;
+    }catch(e){ return '—'; }
+  }
+
+  function detectIdentityCols(cols){
+    const set = new Set();
+    cols.forEach(c=>{
+      const low = c.trim().toLowerCase();
+      if (IDENTITY_CANDIDATES.some(key => low === key || low.includes(key))) set.add(c);
+    });
+    return Array.from(set);
+  }
+
+  function detectQuestions(cols, idCols){
+    const idSet = new Set(idCols.map(c=>c.toLowerCase()));
+    return cols.filter(c => !idSet.has(c.toLowerCase()));
+  }
+
+  function cleanRows(rows){
+    return rows.map(r=>{
+      const o = {};
+      for (const k in r){
+        const nk = (k || '').trim();
+        let v = r[k];
+        if (v == null) v = '';
+        o[nk] = String(v).trim();
+      }
+      return o;
+    });
+  }
+
+  function parseDate(str){
+    // Microsoft Forms typically exports friendly timestamps; rely on Date().
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function withinDateRange(row){
+    const from = dateFromEl.value ? new Date(dateFromEl.value+'T00:00:00') : null;
+    const to   = dateToEl.value   ? new Date(dateToEl.value+'T23:59:59') : null;
+    const when = row['Completion time'] || row['Completion Time'] || row['Start time'] || row['Start Time'] || '';
+    const d = parseDate(when);
+    if (!d) return true;
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  }
+
+  function tokenize(text){
+    return (text||'').toLowerCase().replace(/[^a-z0-9\s']/g,' ')
+      .split(/\s+/).filter(Boolean);
+  }
+  const STOP = new Set('the,and,or,a,an,to,of,for,in,on,at,is,it,this,that,with,as,be,are,was,were,by,from,but,so,if,we,you,i,they,our,their,my,me,your,us,not,have,has,had,do,does,did,about,just,like,more,most,less,can,will,would,could,very,really,also,too'.split(','));
+
+  // Theme keywords
+  const THEMES = {
+    Workload: ['workload','overtime','hours','overworked','capacity','stress','busy','burnout','too much','understaffed'],
+    Communication: ['communication','communicate','feedback','clarity','confusing','expectations','direction','alignment','updates'],
+    Tools: ['tools','equipment','laptop','tablet','software','system','process','processes','sharepoint','internet'],
+    Growth: ['learn','training','development','cross-train','career','promotion','mentor','coaching','grow'],
+    Recognition: ['recognition','recognized','appreciate','appreciation','praise','kudos','told when you do','shoutout'],
+    'Pay/Benefits': ['pay','bonus','compensation','raise','benefits','insurance','pto','salary','incentive'],
+    Manager: ['manager','leadership','boss','direct report','supervisor','lead','doc','director'],
+    Culture: ['culture','team','values','mission','morale','belong','respect','supportive','toxic']
+  };
+
+  function tagThemes(text){
+    const t = text.toLowerCase();
+    const hits = [];
+    for (const [theme, keys] of Object.entries(THEMES)){
+      if (keys.some(k => t.includes(k))) hits.push(theme);
+    }
+    return hits;
+  }
+
+  function computeRisk(row, field){
+    const s = new Sentiment();
+    const txt = (row[field]||'') + ' ' + Object.values(row).join(' ');
+    const score = s.analyze(txt).score;
+    const t = txt.toLowerCase();
+    const riskWords = ['leave','leaving','quit','quitting','another job','burnout','burned out','toxic','hostile','unsafe','overwhelmed','underpaid','unfair','stressed','stressful'];
+    const hasRiskWord = riskWords.some(w => t.includes(w));
+    let risk = 0;
+    if (score <= -2) risk += 2;
+    if (score < 0) risk += 1;
+    if (hasRiskWord) risk += 2;
+    // Date recency (last 60 days -> +1)
+    const when = row['Completion time'] || row['Completion Time'] || row['Start time'] || row['Start Time'] || '';
+    const d = parseDate(when);
+    if (d){
+      const days = (Date.now() - d.getTime()) / (1000*60*60*24);
+      if (days <= 60) risk += 1;
+    }
+    return risk; // 0-5+
+  }
+
+  function sentimentForRows(rows, field){
+    const s = new Sentiment();
+    const scores = [];
+    let pos=0,neg=0,neu=0;
+    rows.forEach(r=>{
+      const t = (r[field]||'').trim();
+      if (!t) return;
+      const res = s.analyze(t);
+      scores.push(res.score);
+      if (res.score>0) pos++; else if (res.score<0) neg++; else neu++;
+    });
+    const avg = scores.length ? (scores.reduce((a,c)=>a+c,0)/scores.length) : 0;
+    return {avg, pos, neg, neu, total:scores.length};
+  }
+
+  function topKeywords(rows, field, n=15){
+    const freq = Object.create(null);
+    rows.forEach(r=>{
+      tokenize(r[field]).forEach(w=>{
+        if (!STOP.has(w) && w.length>2){ freq[w]=(freq[w]||0)+1; }
+      });
+    });
+    return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,n);
+  }
+
+  function responsesOverTime(rows){
+    const map = Object.create(null);
+    rows.forEach(r=>{
+      const when = r['Completion time'] || r['Completion Time'] || r['Start time'] || r['Start Time'] || '';
+      const d = parseDate(when);
+      if (!d) return;
+      const key = d.toISOString().slice(0,10);
+      map[key] = (map[key]||0)+1;
+    });
+    const entries = Object.entries(map).sort((a,b)=>a[0].localeCompare(b[0]));
+    return {labels:entries.map(e=>e[0]), values:entries.map(e=>e[1])};
+  }
+
+  function filterRows(){
+    const q = (searchBox.value||'').toLowerCase();
+    const from = dateFromEl.value ? new Date(dateFromEl.value+'T00:00:00') : null;
+    const to = dateToEl.value ? new Date(dateToEl.value+'T23:59:59') : null;
+    return CLEAN.filter(r=>{
+      // search
+      if (q){
+        const hay = Object.values(r).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      // date
+      if (from || to){
+        const when = r['Completion time'] || r['Completion Time'] || r['Start time'] || r['Start Time'] || '';
+        const d = parseDate(when);
+        if (d){
+          if (from && d<from) return false;
+          if (to && d>to) return false;
+        }
+      }
+      // has answer if required
+      if (onlyWithAnswersEl.checked && currentQuestion){
+        const ans = (r[currentQuestion]||'').trim();
+        if (!ans) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderKPIs(rows){
+    const field = currentQuestion;
+    const sent = sentimentForRows(rows, field);
+    avgSentimentEl.textContent = sent.avg.toFixed(2);
+    sentCountsEl.textContent = `+${sent.pos} / 0:${sent.neu} / -${sent.neg} (n=${sent.total})`;
+
+    // risk
+    let risky = 0;
+    rows.forEach(r=>{ if (computeRisk(r, field) >= 3) risky++; });
+    riskCountEl.textContent = risky;
+    riskExplainEl.textContent = "≥3 (neg tone + risk keywords and/or recent)";
+    // themes
+    const themeFreq = Object.create(null);
+    rows.forEach(r=>{
+      const ans = (r[field]||'') + ' ' + Object.values(r).join(' ');
+      tagThemes(ans).forEach(t => themeFreq[t]=(themeFreq[t]||0)+1);
+    });
+    themeChipsEl.innerHTML = '';
+    Object.entries(themeFreq).sort((a,b)=>b[1]-a[1]).slice(0,8).forEach(([t,c])=>{
+      const span = document.createElement('span'); span.className='chip'; span.textContent=`${t} (${c})`;
+      themeChipsEl.appendChild(span);
+    });
+  }
+
+  function makeBar(ctx, labels, data, title){
+    if (ctx.chartInstance) ctx.chartInstance.destroy();
+    ctx.chartInstance = new Chart(ctx, {
+      type:'bar',
+      data:{ labels, datasets:[{ label:title, data }] },
+      options:{
+        responsive:true,
+        plugins:{ legend:{ display:false } },
+        scales:{
+          x:{ ticks:{ color:'#9aa4b2' }, grid:{ color:'rgba(255,255,255,0.05)' } },
+          y:{ ticks:{ color:'#9aa4b2' }, grid:{ color:'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+  }
+
+  function makeLine(ctx, labels, data, title){
+    if (ctx.chartInstance) ctx.chartInstance.destroy();
+    ctx.chartInstance = new Chart(ctx,{
+      type:'line',
+      data:{ labels, datasets:[{ label:title, data, tension:.3, fill:false }] },
+      options:{
+        responsive:true,
+        plugins:{ legend:{ display:false } },
+        scales:{
+          x:{ ticks:{ color:'#9aa4b2' }, grid:{ color:'rgba(255,255,255,0.05)' } },
+          y:{ ticks:{ color:'#9aa4b2' }, grid:{ color:'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+  }
+
+  function updateCharts(rows){
+    const field = currentQuestion;
+    const sent = sentimentForRows(rows, field);
+    const sentCtx = document.getElementById('sentChart').getContext('2d');
+    makeBar(sentCtx, ['Positive','Neutral','Negative'], [sent.pos, sent.neu, sent.neg], 'Sentiment');
+
+    const kw = topKeywords(rows, field, 15);
+    const kwCtx = document.getElementById('kwChart').getContext('2d');
+    makeBar(kwCtx, kw.map(k=>k[0]), kw.map(k=>k[1]), 'Keywords');
+
+    const tl = responsesOverTime(rows);
+    const tlCtx = document.getElementById('timeChart').getContext('2d');
+    makeLine(tlCtx, tl.labels, tl.values, 'Responses');
+  }
+
+  function buildTable(rows){
+    const tableHead = document.getElementById('tableHead');
+    const tableBody = document.getElementById('tableBody');
+    tableHead.innerHTML=''; tableBody.innerHTML='';
+
+    if (!rows.length) return;
+
+    // build headers
+    const tr = document.createElement('tr');
+    columns.forEach(c=>{
+      const th = document.createElement('th'); th.textContent = c;
+      tr.appendChild(th);
+    });
+    // extra derived cols
+    const thT = document.createElement('th'); thT.textContent = 'Themes'; tr.appendChild(thT);
+    const thR = document.createElement('th'); thR.textContent = 'Risk'; tr.appendChild(thR);
+    tableHead.appendChild(tr);
+
+    // rows
+    rows.forEach((r, i)=>{
+      const tr = document.createElement('tr');
+      tr.style.cursor='pointer';
+      tr.addEventListener('click', ()=>{
+        const txt = r[currentQuestion] || '(no answer)';
+        alert(currentQuestion + '\n\n' + txt);
+      });
+
+      columns.forEach(c=>{
+        const td = document.createElement('td');
+        let v = r[c] || '';
+        if (hideIdentitiesEl.checked && ['email','name','name2','employee','system name'].some(k => c.toLowerCase().includes(k))){
+          v = v ? '(hidden)' : '';
+        }
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+
+      const themes = tagThemes((r[currentQuestion]||'') + ' ' + Object.values(r).join(' '));
+      const tdT = document.createElement('td'); tdT.textContent = themes.join(', '); tr.appendChild(tdT);
+
+      const risk = computeRisk(r, currentQuestion);
+      const tdR = document.createElement('td'); tdR.textContent = risk; tdR.style.color = risk>=3 ? '#ff7b9c' : '#7cf8a9'; tr.appendChild(tdR);
+
+      tableBody.appendChild(tr);
+    });
+  }
+
+  function refresh(){
+    const rows = filterRows();
+    respCountEl.textContent = 'Responses: ' + rows.length;
+    renderKPIs(rows);
+    updateCharts(rows);
+    buildTable(rows);
+  }
+
+  function exportCSV(){
+    const rows = filterRows();
+    if (!rows.length) return;
+    const cols = columns.concat(['Themes','Risk']);
+    const csv = [cols.join(',')].concat(rows.map(r=>{
+      const themes = tagThemes((r[currentQuestion]||'') + ' ' + Object.values(r).join(' ')).join('; ');
+      const risk = computeRisk(r, currentQuestion);
+      const line = cols.map(c=>{
+        const v = (c==='Themes') ? themes :
+                  (c==='Risk') ? risk :
+                  (r[c]||'');
+        return '"' + String(v).replace(/"/g,'""') + '"';
+      }).join(',');
+      return line;
+    })).join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'filtered_responses.csv'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function buildQuestionSelect(){
+    questionSelect.innerHTML='';
+    questionCols.forEach(q=>{
+      const opt = document.createElement('option'); opt.value=q; opt.textContent=q; questionSelect.appendChild(opt);
+    });
+    currentQuestion = questionCols[0] || null;
+  }
+
+  function loadCSV(url){
+    return new Promise((resolve,reject)=>{
+      Papa.parse(url, {
+        download:true, header:true, dynamicTyping:false, skipEmptyLines:true,
+        complete: res => resolve(res.data), error: reject
+      });
+    });
+  }
+
+  async function init(url){
+    try{
+      updatedAtEl.textContent = 'Loading…';
+      RAW = await loadCSV(url);
+      CLEAN = cleanRows(RAW);
+      if (!CLEAN.length) throw new Error('No rows loaded');
+
+      columns = Object.keys(CLEAN[0]);
+      identityCols = detectIdentityCols(columns);
+      questionCols = detectQuestions(columns, identityCols);
+
+      buildQuestionSelect();
+
+      respCountEl.textContent = 'Responses: ' + CLEAN.length;
+      updatedAtEl.textContent = 'Loaded: ' + new Date().toLocaleString();
+      csvShortEl.textContent = shortUrl(url);
+      colCountEl.textContent = columns.length;
+      idColsEl.textContent = identityCols.length;
+
+      refresh();
+    }catch(e){
+      updatedAtEl.textContent = 'Load failed';
+      alert('Failed to load CSV. Check the URL and that the file is public.\n\n' + e.message);
+    }
+  }
+
+  // ===== WIRE UP =====
+  reloadBtn.addEventListener('click', ()=>{
+    const url = csvUrlEl.value.trim() || DEFAULT_CSV_URL;
+    if (!url){ alert('Paste your GitHub RAW CSV URL first.'); return; }
+    init(url);
+  });
+  questionSelect.addEventListener('change', e => { currentQuestion = e.target.value; refresh(); });
+  searchBox.addEventListener('input', refresh);
+  dateFromEl.addEventListener('change', refresh);
+  dateToEl.addEventListener('change', refresh);
+  hideIdentitiesEl.addEventListener('change', refresh);
+  onlyWithAnswersEl.addEventListener('change', refresh);
+  exportBtn.addEventListener('click', exportCSV);
+
+  // Pre-fill & try to auto-load a local CSV named EmployeeSurvey.csv in same folder
+  const localDefault = window.location.origin + window.location.pathname.replace(/[^/]+$/, '') + 'EmployeeSurvey.csv';
+  csvUrlEl.value = DEFAULT_CSV_URL;
+  // Try local first so opening index.html + CSV side-by-side "just works"
+  fetch(localDefault, {method:'HEAD'}).then(r=>{
+    if (r.ok){
+      csvUrlEl.value = localDefault;
+      init(localDefault);
+    }
+  }).catch(()=>{/* ignore */});
+})();
+</script>
+</body>
+</html>
