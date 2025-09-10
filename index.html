@@ -4,13 +4,6 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Employee Sentiment Dashboard</title>
-<!--
-  HOW TO USE
-  1) Host your CSV at:
-     https://raw.githubusercontent.com/<your-username>/Survey/main/EmployeeSurvey.csv
-  2) Update DEFAULT_CSV_URL below OR paste it into the "CSV Data Source" box and click Load.
-  3) Open this file locally or via GitHub Pages.
--->
 <style>
   :root{
     --bg:#0f1117;--card:#151924;--muted:#9aa4b2;--text:#e9eef4;
@@ -65,7 +58,7 @@
       <div class="row">
         <div class="col-6" style="grid-column:span 6">
           <label>CSV Data Source (GitHub RAW or local file URL)</label>
-          <input id="csvUrl" placeholder="https://raw.githubusercontent.com/meekste10/Survey/main/EmployeeSurveys.csv">
+          <input id="csvUrl" value="https://raw.githubusercontent.com/meekste10/Survey/main/EmployeeSurveys.csv">
         </div>
         <div class="col-3">
           <label>Question to Analyze</label>
@@ -154,6 +147,9 @@
 
 <script>
 (function(){
+  // === FIXED: make Sentiment available ===
+  const Sentiment = window.Sentiment;
+
   // ===== CONFIG =====
   const DEFAULT_CSV_URL = "https://raw.githubusercontent.com/meekste10/Survey/main/EmployeeSurveys.csv";
   const IDENTITY_CANDIDATES = [
@@ -229,20 +225,8 @@
   }
 
   function parseDate(str){
-    // Microsoft Forms typically exports friendly timestamps; rely on Date().
     const d = new Date(str);
     return isNaN(d.getTime()) ? null : d;
-  }
-
-  function withinDateRange(row){
-    const from = dateFromEl.value ? new Date(dateFromEl.value+'T00:00:00') : null;
-    const to   = dateToEl.value   ? new Date(dateToEl.value+'T23:59:59') : null;
-    const when = row['Completion time'] || row['Completion Time'] || row['Start time'] || row['Start Time'] || '';
-    const d = parseDate(when);
-    if (!d) return true;
-    if (from && d < from) return false;
-    if (to && d > to) return false;
-    return true;
   }
 
   function tokenize(text){
@@ -283,14 +267,7 @@
     if (score <= -2) risk += 2;
     if (score < 0) risk += 1;
     if (hasRiskWord) risk += 2;
-    // Date recency (last 60 days -> +1)
-    const when = row['Completion time'] || row['Completion Time'] || row['Start time'] || row['Start Time'] || '';
-    const d = parseDate(when);
-    if (d){
-      const days = (Date.now() - d.getTime()) / (1000*60*60*24);
-      if (days <= 60) risk += 1;
-    }
-    return risk; // 0-5+
+    return risk;
   }
 
   function sentimentForRows(rows, field){
@@ -333,24 +310,11 @@
 
   function filterRows(){
     const q = (searchBox.value||'').toLowerCase();
-    const from = dateFromEl.value ? new Date(dateFromEl.value+'T00:00:00') : null;
-    const to = dateToEl.value ? new Date(dateToEl.value+'T23:59:59') : null;
     return CLEAN.filter(r=>{
-      // search
       if (q){
         const hay = Object.values(r).join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      // date
-      if (from || to){
-        const when = r['Completion time'] || r['Completion Time'] || r['Start time'] || r['Start Time'] || '';
-        const d = parseDate(when);
-        if (d){
-          if (from && d<from) return false;
-          if (to && d>to) return false;
-        }
-      }
-      // has answer if required
       if (onlyWithAnswersEl.checked && currentQuestion){
         const ans = (r[currentQuestion]||'').trim();
         if (!ans) return false;
@@ -365,12 +329,10 @@
     avgSentimentEl.textContent = sent.avg.toFixed(2);
     sentCountsEl.textContent = `+${sent.pos} / 0:${sent.neu} / -${sent.neg} (n=${sent.total})`;
 
-    // risk
     let risky = 0;
     rows.forEach(r=>{ if (computeRisk(r, field) >= 3) risky++; });
     riskCountEl.textContent = risky;
-    riskExplainEl.textContent = "≥3 (neg tone + risk keywords and/or recent)";
-    // themes
+    riskExplainEl.textContent = "≥3 (neg tone + risk keywords)";
     const themeFreq = Object.create(null);
     rows.forEach(r=>{
       const ans = (r[field]||'') + ' ' + Object.values(r).join(' ');
@@ -388,14 +350,7 @@
     ctx.chartInstance = new Chart(ctx, {
       type:'bar',
       data:{ labels, datasets:[{ label:title, data }] },
-      options:{
-        responsive:true,
-        plugins:{ legend:{ display:false } },
-        scales:{
-          x:{ ticks:{ color:'#9aa4b2' }, grid:{ color:'rgba(255,255,255,0.05)' } },
-          y:{ ticks:{ color:'#9aa4b2' }, grid:{ color:'rgba(255,255,255,0.05)' } }
-        }
-      }
+      options:{ responsive:true, plugins:{ legend:{ display:false } } }
     });
   }
 
@@ -404,14 +359,7 @@
     ctx.chartInstance = new Chart(ctx,{
       type:'line',
       data:{ labels, datasets:[{ label:title, data, tension:.3, fill:false }] },
-      options:{
-        responsive:true,
-        plugins:{ legend:{ display:false } },
-        scales:{
-          x:{ ticks:{ color:'#9aa4b2' }, grid:{ color:'rgba(255,255,255,0.05)' } },
-          y:{ ticks:{ color:'#9aa4b2' }, grid:{ color:'rgba(255,255,255,0.05)' } }
-        }
-      }
+      options:{ responsive:true, plugins:{ legend:{ display:false } } }
     });
   }
 
@@ -423,7 +371,7 @@
 
     const kw = topKeywords(rows, field, 15);
     const kwCtx = document.getElementById('kwChart').getContext('2d');
-    makeBar(kwCtx, kw.map(k=>k[0]), kw.map(k=>k[1]), 'Keywords');
+    makeBar(kwCtx, kw.map(k=>k[0]), kw.map(k[1]), 'Keywords');
 
     const tl = responsesOverTime(rows);
     const tlCtx = document.getElementById('timeChart').getContext('2d');
@@ -437,19 +385,16 @@
 
     if (!rows.length) return;
 
-    // build headers
     const tr = document.createElement('tr');
     columns.forEach(c=>{
       const th = document.createElement('th'); th.textContent = c;
       tr.appendChild(th);
     });
-    // extra derived cols
     const thT = document.createElement('th'); thT.textContent = 'Themes'; tr.appendChild(thT);
     const thR = document.createElement('th'); thR.textContent = 'Risk'; tr.appendChild(thR);
     tableHead.appendChild(tr);
 
-    // rows
-    rows.forEach((r, i)=>{
+    rows.forEach(r=>{
       const tr = document.createElement('tr');
       tr.style.cursor='pointer';
       tr.addEventListener('click', ()=>{
@@ -493,9 +438,7 @@
       const themes = tagThemes((r[currentQuestion]||'') + ' ' + Object.values(r).join(' ')).join('; ');
       const risk = computeRisk(r, currentQuestion);
       const line = cols.map(c=>{
-        const v = (c==='Themes') ? themes :
-                  (c==='Risk') ? risk :
-                  (r[c]||'');
+        const v = (c==='Themes') ? themes : (c==='Risk') ? risk : (r[c]||'');
         return '"' + String(v).replace(/"/g,'""') + '"';
       }).join(',');
       return line;
@@ -516,10 +459,8 @@
 
   function loadCSV(url){
     return new Promise((resolve,reject)=>{
-      Papa.parse(url, {
-        download:true, header:true, dynamicTyping:false, skipEmptyLines:true,
-        complete: res => resolve(res.data), error: reject
-      });
+      Papa.parse(url, { download:true, header:true, dynamicTyping:false, skipEmptyLines:true,
+        complete: res => resolve(res.data), error: reject });
     });
   }
 
@@ -535,13 +476,11 @@
       questionCols = detectQuestions(columns, identityCols);
 
       buildQuestionSelect();
-
       respCountEl.textContent = 'Responses: ' + CLEAN.length;
       updatedAtEl.textContent = 'Loaded: ' + new Date().toLocaleString();
       csvShortEl.textContent = shortUrl(url);
       colCountEl.textContent = columns.length;
       idColsEl.textContent = identityCols.length;
-
       refresh();
     }catch(e){
       updatedAtEl.textContent = 'Load failed';
@@ -552,7 +491,6 @@
   // ===== WIRE UP =====
   reloadBtn.addEventListener('click', ()=>{
     const url = csvUrlEl.value.trim() || DEFAULT_CSV_URL;
-    if (!url){ alert('Paste your GitHub RAW CSV URL first.'); return; }
     init(url);
   });
   questionSelect.addEventListener('change', e => { currentQuestion = e.target.value; refresh(); });
@@ -563,16 +501,8 @@
   onlyWithAnswersEl.addEventListener('change', refresh);
   exportBtn.addEventListener('click', exportCSV);
 
-  // Pre-fill & try to auto-load a local CSV named EmployeeSurvey.csv in same folder
-  const localDefault = window.location.origin + window.location.pathname.replace(/[^/]+$/, '') + 'EmployeeSurvey.csv';
-  csvUrlEl.value = DEFAULT_CSV_URL;
-  // Try local first so opening index.html + CSV side-by-side "just works"
-  fetch(localDefault, {method:'HEAD'}).then(r=>{
-    if (r.ok){
-      csvUrlEl.value = localDefault;
-      init(localDefault);
-    }
-  }).catch(()=>{/* ignore */});
+  // Auto-init with default URL
+  init(DEFAULT_CSV_URL);
 })();
 </script>
 </body>
